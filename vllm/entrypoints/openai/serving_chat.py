@@ -32,6 +32,7 @@ from vllm.entrypoints.openai.serving_engine import (BaseModelPath,
 from vllm.entrypoints.openai.tool_parsers import (Hermes2ProToolParser,
                                                   Llama3JsonToolParser,
                                                   MistralToolParser,
+                                                  OarfishToolParser,
                                                   ToolParser)
 from vllm.inputs import TokensPrompt
 from vllm.logger import init_logger
@@ -88,6 +89,8 @@ class OpenAIServingChat(OpenAIServing):
                 self.tool_parser = Hermes2ProToolParser
             elif tool_parser == "llama3_json":
                 self.tool_parser = Llama3JsonToolParser
+            elif tool_parser == "oarfish":
+                self.tool_parser = OarfishToolParser
             else:
                 raise TypeError("Error: --enable-auto-tool-choice requires "
                                 "--tool-call-parser")
