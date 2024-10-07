@@ -7,12 +7,13 @@ import partial_json_parser
 from partial_json_parser.core.options import Allow
 from transformers import PreTrainedTokenizerBase
 
-from vllm.entrypoints.openai.protocol import (DeltaFunctionCall, DeltaMessage,
+from vllm.entrypoints.openai.protocol import (ChatCompletionRequest,
+                                              DeltaFunctionCall, DeltaMessage,
                                               DeltaToolCall,
                                               ExtractedToolCallInformation,
                                               FunctionCall, ToolCall)
 from vllm.entrypoints.openai.tool_parsers.abstract_tool_parser import (
-    ToolParser)
+    ToolParser, ToolParserManager)
 from vllm.entrypoints.openai.tool_parsers.utils import find_common_prefix
 from vllm.logger import init_logger
 from vllm.utils import random_uuid
@@ -41,12 +42,12 @@ def is_complete_json(input_str):
         return False
 
 
+@ToolParserManager.register_module("oarfish")
 class OarfishToolParser(ToolParser):
     """
-    Tool call parser for Llama 3.1 models intended for use with the
-    examples/tool_chat_template_llama.jinja template.
+    Tool call parser for ebOpenOarfish models.
 
-    Used when --enable-auto-tool-choice --tool-call-parser mistral are all set
+    Used when --enable-auto-tool-choice --tool-call-parser oarfish are all set
     """
 
     def __init__(self, tokenizer: PreTrainedTokenizerBase):
@@ -64,8 +65,9 @@ class OarfishToolParser(ToolParser):
                                              add_special_tokens=False)[0]
         self.tool_call_regex = re.compile(r"\[{.*?}\]", re.DOTALL)
 
-    def extract_tool_calls(self,
-                           model_output: str) -> ExtractedToolCallInformation:
+    def extract_tool_calls(
+            self, model_output: str,
+            request: ChatCompletionRequest) -> ExtractedToolCallInformation:
         """
         Extract the tool calls from a complete model response.
         """
@@ -119,6 +121,7 @@ class OarfishToolParser(ToolParser):
         previous_token_ids: Sequence[int],
         current_token_ids: Sequence[int],
         delta_token_ids: Sequence[int],
+        request: ChatCompletionRequest,
     ) -> Union[DeltaMessage, None]:
 
         if not current_text.startswith(self.bot_token):
