@@ -1,10 +1,11 @@
-from .abstract_tool_parser import ToolParser
+from .abstract_tool_parser import ToolParser, ToolParserManager
 from .hermes_tool_parser import Hermes2ProToolParser
+from .internlm2_tool_parser import Internlm2ToolParser
 from .llama_tool_parser import Llama3JsonToolParser
 from .mistral_tool_parser import MistralToolParser
 from .oarfish_tool_parser import OarfishToolParser
 
 __all__ = [
-    "ToolParser", "Hermes2ProToolParser", "MistralToolParser",
-    "Llama3JsonToolParser", "OarfishToolParser"
+    "ToolParser", "ToolParserManager", "Hermes2ProToolParser",
+    "MistralToolParser", "Internlm2ToolParser", "Llama3JsonToolParser", "OarfishToolParser"
 ]
