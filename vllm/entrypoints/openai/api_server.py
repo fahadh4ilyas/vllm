@@ -1,4 +1,5 @@
 import asyncio
+import json
 import importlib
 import inspect
 import multiprocessing
@@ -11,7 +12,7 @@ from argparse import Namespace
 from contextlib import asynccontextmanager
 from functools import partial
 from http import HTTPStatus
-from typing import AsyncIterator, Set
+from typing import AsyncIterator, Set, AsyncGenerator
 
 import uvloop
 from fastapi import APIRouter, FastAPI, Request
@@ -21,6 +22,9 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from starlette.datastructures import State
 from starlette.routing import Mount
 from typing_extensions import assert_never
+
+from outlines.models.vllm import adapt_tokenizer
+from outlines.processors import JSONLogitsProcessor, RegexLogitsProcessor
 
 import vllm.envs as envs
 from vllm.config import ModelConfig
@@ -56,8 +60,9 @@ from vllm.entrypoints.openai.serving_tokenization import (
     OpenAIServingTokenization)
 from vllm.entrypoints.openai.tool_parsers import ToolParserManager
 from vllm.logger import init_logger
+from vllm.sampling_params import SamplingParams
 from vllm.usage.usage_lib import UsageContext
-from vllm.utils import FlexibleArgumentParser, get_open_zmq_ipc_path
+from vllm.utils import FlexibleArgumentParser, get_open_zmq_ipc_path, iterate_with_cancellation, random_uuid
 from vllm.version import __version__ as VLLM_VERSION
 
 TIMEOUT_KEEP_ALIVE = 5  # seconds
@@ -271,6 +276,62 @@ async def health(raw_request: Request) -> Response:
     await engine_client(raw_request).check_health()
     return Response(status_code=200)
 
+
+@router.post("/vllm/generate")
+async def vllm_generate(request: Request) -> Response:
+    engine = await engine_client(request).check_health()
+    tokenizer = await engine.get_tokenizer()
+    tokenizer = adapt_tokenizer(tokenizer)
+
+    request_dict = await request.json()
+    prompt = request_dict.pop("prompt")
+    stream = request_dict.pop("stream", False)
+    json_schema = request_dict.pop("schema", None)
+    regex_string = request_dict.pop("regex", None)
+    if json_schema is not None:
+        logits_processors = [JSONLogitsProcessor(json_schema, tokenizer)]
+    elif regex_string is not None:
+        logits_processors = [RegexLogitsProcessor(regex_string, tokenizer)]
+    else:
+        logits_processors = []
+    sampling_params = sampling_params = SamplingParams(
+        **request_dict, logits_processors=logits_processors  # type: ignore
+    )
+    request_id = random_uuid()
+
+    assert engine is not None
+    results_generator = engine.generate(prompt, sampling_params, request_id)
+    results_generator = iterate_with_cancellation(
+        results_generator, is_cancelled=request.is_disconnected)
+
+    # Streaming case
+    async def stream_results() -> AsyncGenerator[bytes, None]:
+        async for request_output in results_generator:
+            prompt = request_output.prompt
+            assert prompt is not None
+            text_outputs = [
+                prompt + output.text for output in request_output.outputs
+            ]
+            ret = {"text": text_outputs}
+            yield (json.dumps(ret) + "\0").encode("utf-8")
+
+    if stream:
+        return StreamingResponse(stream_results())
+
+    # Non-streaming case
+    final_output = None
+    try:
+        async for request_output in results_generator:
+            final_output = request_output
+    except asyncio.CancelledError:
+        return Response(status_code=499)
+
+    assert final_output is not None
+    prompt = final_output.prompt
+    assert prompt is not None
+    text_outputs = [prompt + output.text for output in final_output.outputs]
+    ret = {"text": text_outputs}
+    return JSONResponse(ret)
 
 @router.post("/tokenize")
 async def tokenize(request: TokenizeRequest, raw_request: Request):

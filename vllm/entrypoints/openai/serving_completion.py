@@ -7,6 +7,9 @@ from typing import Tuple, Union, cast
 
 from fastapi import Request
 
+from outlines.models.vllm import adapt_tokenizer
+from outlines.processors import JSONLogitsProcessor, RegexLogitsProcessor
+
 from vllm.config import ModelConfig
 from vllm.engine.protocol import EngineClient
 from vllm.entrypoints.logger import RequestLogger
@@ -110,6 +113,14 @@ class OpenAIServingCompletion(OpenAIServing):
             ) = self._maybe_get_adapters(request)
 
             tokenizer = await self.engine_client.get_tokenizer(lora_request)
+            outlines_tokenizer = None
+            logits_processors = None
+            if request.json_schema is not None or request.regex_string is not None:
+                outlines_tokenizer = adapt_tokenizer(await self.engine_client.get_tokenizer(lora_request))
+                if request.json_schema:
+                    logits_processors = [JSONLogitsProcessor(request.json_schema, outlines_tokenizer)]
+                elif request.regex_string is not None:
+                    logits_processors = [RegexLogitsProcessor(request.regex_string, outlines_tokenizer)]
 
             prompts = list(
                 self._tokenize_prompt_input_or_inputs(
@@ -129,7 +140,7 @@ class OpenAIServingCompletion(OpenAIServing):
                         default_max_tokens)
                 else:
                     sampling_params = request.to_sampling_params(
-                        default_max_tokens)
+                        default_max_tokens, logits_processors)
 
                 request_id_item = f"{request_id}-{i}"
 

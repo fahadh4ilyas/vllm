@@ -8,6 +8,9 @@ from typing import Union
 
 from fastapi import Request
 
+from outlines.models.vllm import adapt_tokenizer
+from outlines.processors import JSONLogitsProcessor, RegexLogitsProcessor
+
 from vllm.config import ModelConfig
 from vllm.engine.protocol import EngineClient
 from vllm.entrypoints.chat_utils import (ConversationMessage,
@@ -120,6 +123,14 @@ class OpenAIServingChat(OpenAIServing):
 
             model_config = self.model_config
             tokenizer = await self.engine_client.get_tokenizer(lora_request)
+            outlines_tokenizer = None
+            logits_processors = None
+            if request.json_schema is not None or request.regex_string is not None:
+                outlines_tokenizer = adapt_tokenizer(await self.engine_client.get_tokenizer(lora_request))
+                if request.json_schema:
+                    logits_processors = [JSONLogitsProcessor(request.json_schema, outlines_tokenizer)]
+                elif request.regex_string is not None:
+                    logits_processors = [RegexLogitsProcessor(request.regex_string, outlines_tokenizer)]
 
             conversation, mm_data_future = parse_chat_messages_futures(
                 request.messages, model_config, tokenizer)
@@ -212,7 +223,7 @@ class OpenAIServingChat(OpenAIServing):
                     default_max_tokens)
             else:
                 sampling_params = request.to_sampling_params(
-                    default_max_tokens)
+                    default_max_tokens, logits_processors)
 
             self._log_inputs(request_id,
                              prompt_inputs,
