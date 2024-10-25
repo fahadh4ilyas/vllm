@@ -284,6 +284,12 @@ class ChatCompletionRequest(OpenAIBaseModel):
             "The priority of the request (lower means earlier handling; "
             "default: 0). Any priority other than 0 will raise an error "
             "if the served model does not use priority scheduling."))
+    json_schema: Optional[Union[str, dict]] = Field(
+        default=None
+    )
+    regex_string: Optional[str] = Field(
+        default=None
+    )
 
     # doc: end-chat-completion-extra-params
 
@@ -304,7 +310,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
             length_penalty=self.length_penalty,
         )
 
-    def to_sampling_params(self, default_max_tokens: int) -> SamplingParams:
+    def to_sampling_params(self, default_max_tokens: int, logits_processors: Optional[list] = None) -> SamplingParams:
         max_tokens = self.max_tokens
         if max_tokens is None:
             max_tokens = default_max_tokens
@@ -347,6 +353,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
             min_tokens=self.min_tokens,
             skip_special_tokens=self.skip_special_tokens,
             spaces_between_special_tokens=self.spaces_between_special_tokens,
+            logits_processors=logits_processors,
             include_stop_str_in_output=self.include_stop_str_in_output,
             truncate_prompt_tokens=self.truncate_prompt_tokens,
             output_kind=RequestOutputKind.DELTA if self.stream \
@@ -576,6 +583,12 @@ class CompletionRequest(OpenAIBaseModel):
             "The priority of the request (lower means earlier handling; "
             "default: 0). Any priority other than 0 will raise an error "
             "if the served model does not use priority scheduling."))
+    json_schema: Optional[Union[str, dict]] = Field(
+        default=None
+    )
+    regex_string: Optional[str] = Field(
+        default=None
+    )
 
     # doc: end-completion-extra-params
 
@@ -596,7 +609,7 @@ class CompletionRequest(OpenAIBaseModel):
             length_penalty=self.length_penalty,
         )
 
-    def to_sampling_params(self, default_max_tokens: int) -> SamplingParams:
+    def to_sampling_params(self, default_max_tokens: int, logits_processors: Optional[list] = None) -> SamplingParams:
         max_tokens = self.max_tokens
         if max_tokens is None:
             max_tokens = default_max_tokens
@@ -641,6 +654,7 @@ class CompletionRequest(OpenAIBaseModel):
             prompt_logprobs=prompt_logprobs,
             skip_special_tokens=self.skip_special_tokens,
             spaces_between_special_tokens=self.spaces_between_special_tokens,
+            logits_processors=logits_processors,
             include_stop_str_in_output=self.include_stop_str_in_output,
             truncate_prompt_tokens=self.truncate_prompt_tokens,
             output_kind=RequestOutputKind.DELTA if self.stream \
