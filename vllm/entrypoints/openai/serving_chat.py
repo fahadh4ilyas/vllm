@@ -124,14 +124,13 @@ class OpenAIServingChat(OpenAIServing):
             model_config = self.model_config
             tokenizer = await self.engine_client.get_tokenizer(lora_request)
             outlines_tokenizer = None
+            logits_processors = None
             if request.json_schema is not None or request.regex_string is not None:
                 outlines_tokenizer = adapt_tokenizer(await self.engine_client.get_tokenizer(lora_request))
                 if request.json_schema:
                     logits_processors = [JSONLogitsProcessor(request.json_schema, outlines_tokenizer)]
                 elif request.regex_string is not None:
                     logits_processors = [RegexLogitsProcessor(request.regex_string, outlines_tokenizer)]
-                else:
-                    logits_processors = None
 
             conversation, mm_data_future = parse_chat_messages_futures(
                 request.messages, model_config, tokenizer)
