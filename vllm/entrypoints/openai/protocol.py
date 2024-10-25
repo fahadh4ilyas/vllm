@@ -284,6 +284,12 @@ class ChatCompletionRequest(OpenAIBaseModel):
             "The priority of the request (lower means earlier handling; "
             "default: 0). Any priority other than 0 will raise an error "
             "if the served model does not use priority scheduling."))
+    request_id: str = Field(
+        default_factory=lambda: f"{random_uuid()}",
+        description=(
+            "The request_id related to this request. If the caller does "
+            "not set it, a random_uuid will be generated. This id is used "
+            "through out the inference process and return in response."))
     json_schema: Optional[Union[str, dict]] = Field(
         default=None
     )
@@ -320,9 +326,15 @@ class ChatCompletionRequest(OpenAIBaseModel):
             prompt_logprobs = self.top_logprobs
 
         guided_json_object = None
-        if (self.response_format is not None
-                and self.response_format.type == "json_object"):
-            guided_json_object = True
+        if self.response_format is not None:
+            if self.response_format.type == "json_object":
+                guided_json_object = True
+            elif self.response_format.type == "json_schema":
+                json_schema = self.response_format.json_schema
+                assert json_schema is not None
+                self.guided_json = json_schema.json_schema
+                if self.guided_decoding_backend is None:
+                    self.guided_decoding_backend = "lm-format-enforcer"
 
         guided_decoding = GuidedDecodingParams.from_optional(
             json=self._get_guided_json_from_tool() or self.guided_json,
@@ -544,8 +556,8 @@ class CompletionRequest(OpenAIBaseModel):
         default=None,
         description=
         ("Similar to chat completion, this parameter specifies the format of "
-         "output. Only {'type': 'json_object'} or {'type': 'text' } is "
-         "supported."),
+         "output. Only {'type': 'json_object'}, {'type': 'json_schema'} or "
+         "{'type': 'text' } is supported."),
     )
     guided_json: Optional[Union[str, dict, BaseModel]] = Field(
         default=None,
