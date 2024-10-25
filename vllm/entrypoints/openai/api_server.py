@@ -277,8 +277,8 @@ async def health(raw_request: Request) -> Response:
     return Response(status_code=200)
 
 
-@router.post("/outlines/generate")
-async def outlines_generate(request: Request) -> Response:
+@router.post("/vllm/generate")
+async def vllm_generate(request: Request) -> Response:
     engine = await engine_client(request).check_health()
     tokenizer = await engine.get_tokenizer()
     tokenizer = adapt_tokenizer(tokenizer)
