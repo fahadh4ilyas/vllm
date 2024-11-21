@@ -7,8 +7,11 @@ from functools import lru_cache, wraps
 from typing import Callable, List, Tuple, TypeVar
 
 import pynvml
+import torch
 from typing_extensions import ParamSpec
 
+# import custom ops, trigger op registration
+import vllm._C  # noqa
 from vllm.logger import init_logger
 
 from .interface import DeviceCapability, Platform, PlatformEnum
@@ -25,6 +28,10 @@ if pynvml.__file__.endswith("__init__.py"):
         " When both of them are installed, `pynvml` will take precedence"
         " and cause errors. See https://pypi.org/project/pynvml "
         "for more information.")
+
+# pytorch 2.5 uses cudnn sdpa by default, which will cause crash on some models
+# see https://github.com/huggingface/diffusers/issues/9704 for details
+torch.backends.cuda.enable_cudnn_sdp(False)
 
 # NVML utils
 # Note that NVML is not affected by `CUDA_VISIBLE_DEVICES`,
@@ -102,6 +109,7 @@ def device_id_to_physical_device_id(device_id: int) -> int:
 
 class CudaPlatform(Platform):
     _enum = PlatformEnum.CUDA
+    device_type: str = "cuda"
 
     @classmethod
     def get_device_capability(cls, device_id: int = 0) -> DeviceCapability:

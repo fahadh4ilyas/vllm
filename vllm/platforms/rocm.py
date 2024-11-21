@@ -5,9 +5,20 @@ import torch
 
 from vllm.logger import init_logger
 
-from .interface import DeviceCapability, Platform, PlatformEnum
+from .interface import DeviceCapability, Platform, PlatformEnum, _Backend
 
 logger = init_logger(__name__)
+
+try:
+    import vllm._C  # noqa: F401
+except ImportError as e:
+    logger.warning("Failed to import from vllm._C with %r", e)
+
+# import custom ops, trigger op registration
+try:
+    import vllm._rocm_C  # noqa: F401
+except ImportError as e:
+    logger.warning("Failed to import from vllm._rocm_C with %r", e)
 
 if os.environ.get("VLLM_WORKER_MULTIPROC_METHOD", None) in ["fork", None]:
     logger.warning("`fork` method is not supported by ROCm. "
@@ -18,6 +29,19 @@ if os.environ.get("VLLM_WORKER_MULTIPROC_METHOD", None) in ["fork", None]:
 
 class RocmPlatform(Platform):
     _enum = PlatformEnum.ROCM
+    device_type: str = "cuda"
+
+    @classmethod
+    def get_default_attn_backend(cls, selected_backend: _Backend) -> _Backend:
+        selected_backend = (_Backend.ROCM_FLASH if selected_backend
+                            == _Backend.FLASH_ATTN else selected_backend)
+        if selected_backend == _Backend.ROCM_FLASH:
+            if not cls.has_device_capability(90):
+                # not Instinct series GPUs.
+                logger.info("flash_attn is not supported on NAVI GPUs.")
+        else:
+            logger.info("%s is not supported in AMD GPUs.", selected_backend)
+        return _Backend.ROCM_FLASH
 
     @classmethod
     @lru_cache(maxsize=8)

@@ -4,10 +4,11 @@ import contextlib
 import datetime
 import enum
 import gc
+import getpass
+import importlib.util
 import inspect
 import ipaddress
 import os
-import random
 import socket
 import subprocess
 import sys
@@ -33,6 +34,7 @@ import torch
 import torch.types
 import yaml
 from packaging.version import Version
+from torch.library import Library
 from typing_extensions import ParamSpec, TypeIs, assert_never
 
 import vllm.envs as envs
@@ -80,16 +82,13 @@ STR_NOT_IMPL_ENC_DEC_SPEC_DEC = ("Speculative decoding is not "
                                  "currently supported with encoder/"
                                  "decoder models.")
 
-STR_NOT_IMPL_ENC_DEC_BACKEND = ("XFormers is the only backend "
-                                "currently supported with encoder/"
+STR_NOT_IMPL_ENC_DEC_BACKEND = ("XFormers and Flash-Attention are the only "
+                                "backends currently supported with encoder/"
                                 "decoder models.")
 
 STR_NOT_IMPL_ENC_DEC_PROMPT_ADAPTER = ("Prompt adapters are not "
                                        "currently supported with encoder/"
                                        "decoder models.")
-
-STR_NOT_IMPL_ENC_DEC_CPU = ("CPU is not currently supported with "
-                            "encoder/decoder models.")
 
 # Efficiently import all enc/dec error strings
 # rather than having to import all of the above
@@ -105,7 +104,6 @@ STR_NOT_IMPL_ENC_DEC_ERR_STRS = {
     "STR_NOT_IMPL_ENC_DEC_SPEC_DEC": STR_NOT_IMPL_ENC_DEC_SPEC_DEC,
     "STR_NOT_IMPL_ENC_DEC_BACKEND": STR_NOT_IMPL_ENC_DEC_BACKEND,
     "STR_NOT_IMPL_ENC_DEC_PROMPT_ADAPTER": STR_NOT_IMPL_ENC_DEC_PROMPT_ADAPTER,
-    "STR_NOT_IMPL_ENC_DEC_CPU": STR_NOT_IMPL_ENC_DEC_CPU
 }
 
 # Constants related to forcing the attention backend selection
@@ -314,19 +312,6 @@ class PyObjectCache:
         self._index = 0
 
 
-def is_hip() -> bool:
-    return torch.version.hip is not None
-
-
-@lru_cache(maxsize=None)
-def is_openvino() -> bool:
-    from importlib.metadata import PackageNotFoundError, version
-    try:
-        return "openvino" in version("vllm")
-    except PackageNotFoundError:
-        return False
-
-
 @lru_cache(maxsize=None)
 def get_max_shared_memory_bytes(gpu: int = 0) -> int:
     """Returns the maximum shared memory per thread block in bytes."""
@@ -342,22 +327,6 @@ def get_max_shared_memory_bytes(gpu: int = 0) -> int:
 def get_cpu_memory() -> int:
     """Returns the total CPU memory of the node in bytes."""
     return psutil.virtual_memory().total
-
-
-def seed_everything(seed: int) -> None:
-    """
-    Set the seed of each random module.
-
-    Loosely based on: https://github.com/Lightning-AI/pytorch-lightning/blob/2.4.0/src/lightning/fabric/utilities/seed.py#L20
-    """
-    random.seed(seed)
-    np.random.seed(seed)
-
-    if current_platform.is_cuda_alike():
-        torch.cuda.manual_seed_all(seed)
-
-    if current_platform.is_xpu():
-        torch.xpu.manual_seed_all(seed)
 
 
 def random_uuid() -> str:
@@ -656,7 +625,7 @@ def create_kv_caches_with_random_flash(
     seed: int = 0,
     device: Optional[str] = "cuda",
 ) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
-    seed_everything(seed)
+    current_platform.seed_everything(seed)
 
     torch_dtype = get_kv_cache_torch_dtype(cache_dtype, model_dtype)
     key_value_cache_shape = (num_blocks, 2, block_size, num_heads, head_size)
@@ -698,7 +667,7 @@ def create_kv_caches_with_random(
             f"Does not support key cache of type fp8 with head_size {head_size}"
         )
 
-    seed_everything(seed)
+    current_platform.seed_everything(seed)
 
     torch_dtype = get_kv_cache_torch_dtype(cache_dtype, model_dtype)
 
@@ -757,7 +726,10 @@ def is_pin_memory_available() -> bool:
     elif current_platform.is_neuron():
         print_warning_once("Pin memory is not supported on Neuron.")
         return False
-    elif current_platform.is_cpu() or is_openvino():
+    elif current_platform.is_hpu():
+        print_warning_once("Pin memory is not supported on HPU.")
+        return False
+    elif current_platform.is_cpu() or current_platform.is_openvino():
         return False
     return True
 
@@ -997,6 +969,8 @@ def enable_trace_function_call_for_thread() -> None:
 
     if envs.VLLM_TRACE_FUNCTION:
         tmp_dir = tempfile.gettempdir()
+        # add username to tmp_dir to avoid permission issues
+        tmp_dir = os.path.join(tmp_dir, getpass.getuser())
         filename = (f"VLLM_TRACE_FUNCTION_for_process_{os.getpid()}"
                     f"_thread_{threading.get_ident()}_"
                     f"at_{datetime.datetime.now()}.log").replace(" ", "_")
@@ -1007,7 +981,8 @@ def enable_trace_function_call_for_thread() -> None:
 
 
 # `functools` helpers
-def identity(value: T) -> T:
+def identity(value: T, **kwargs) -> T:
+    """Returns the first provided value."""
     return value
 
 
@@ -1107,7 +1082,7 @@ def _cuda_device_count_stateless(
 
     if not torch.cuda._is_compiled():
         return 0
-    if is_hip():
+    if current_platform.is_rocm():
         # ROCm uses amdsmi instead of nvml for stateless device count
         # This requires a sufficiently modern version of Torch 2.4.0
         raw_count = torch.cuda._device_count_amdsmi() if (hasattr(
@@ -1164,15 +1139,41 @@ def run_once(f: Callable[P, None]) -> Callable[P, None]:
     return wrapper
 
 
+class StoreBoolean(argparse.Action):
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        if values.lower() == "true":
+            setattr(namespace, self.dest, True)
+        elif values.lower() == "false":
+            setattr(namespace, self.dest, False)
+        else:
+            raise ValueError(f"Invalid boolean value: {values}. "
+                             "Expected 'true' or 'false'.")
+
+
+class SortedHelpFormatter(argparse.HelpFormatter):
+    """SortedHelpFormatter that sorts arguments by their option strings."""
+
+    def add_arguments(self, actions):
+        actions = sorted(actions, key=lambda x: x.option_strings)
+        super().add_arguments(actions)
+
+
 class FlexibleArgumentParser(argparse.ArgumentParser):
     """ArgumentParser that allows both underscore and dash in names."""
+
+    def __init__(self, *args, **kwargs):
+        # Set the default 'formatter_class' to SortedHelpFormatter
+        if 'formatter_class' not in kwargs:
+            kwargs['formatter_class'] = SortedHelpFormatter
+        super().__init__(*args, **kwargs)
 
     def parse_args(self, args=None, namespace=None):
         if args is None:
             args = sys.argv[1:]
 
         if '--config' in args:
-            args = FlexibleArgumentParser._pull_args_from_config(args)
+            args = self._pull_args_from_config(args)
 
         # Convert underscores to dashes and vice versa in argument names
         processed_args = []
@@ -1190,8 +1191,7 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
 
         return super().parse_args(processed_args, namespace)
 
-    @staticmethod
-    def _pull_args_from_config(args: List[str]) -> List[str]:
+    def _pull_args_from_config(self, args: List[str]) -> List[str]:
         """Method to pull arguments specified in the config file
         into the command-line args variable.
 
@@ -1235,7 +1235,7 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
 
         file_path = args[index + 1]
 
-        config_args = FlexibleArgumentParser._load_config_file(file_path)
+        config_args = self._load_config_file(file_path)
 
         # 0th index is for {serve,chat,complete}
         # followed by model_tag (only for serve)
@@ -1256,8 +1256,7 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
 
         return args
 
-    @staticmethod
-    def _load_config_file(file_path: str) -> List[str]:
+    def _load_config_file(self, file_path: str) -> List[str]:
         """Loads a yaml file and returns the key value pairs as a
         flattened list with argparse like pattern
         ```yaml
@@ -1283,7 +1282,7 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
 
         config: Dict[str, Union[int, str]] = {}
         try:
-            with open(file_path, 'r') as config_file:
+            with open(file_path) as config_file:
                 config = yaml.safe_load(config_file)
         except Exception as ex:
             logger.error(
@@ -1291,9 +1290,18 @@ class FlexibleArgumentParser(argparse.ArgumentParser):
                 Make sure path is correct", file_path)
             raise ex
 
+        store_boolean_arguments = [
+            action.dest for action in self._actions
+            if isinstance(action, StoreBoolean)
+        ]
+
         for key, value in config.items():
-            processed_args.append('--' + key)
-            processed_args.append(str(value))
+            if isinstance(value, bool) and key not in store_boolean_arguments:
+                if value:
+                    processed_args.append('--' + key)
+            else:
+                processed_args.append('--' + key)
+                processed_args.append(str(value))
 
         return processed_args
 
@@ -1483,8 +1491,115 @@ class LazyDict(Mapping, Generic[T]):
             self._dict[key] = self._factory[key]()
         return self._dict[key]
 
+    def __setitem__(self, key: str, value: Callable[[], T]):
+        self._factory[key] = value
+
     def __iter__(self):
         return iter(self._factory)
 
     def __len__(self):
         return len(self._factory)
+
+
+def weak_ref_tensor(tensor: torch.Tensor) -> torch.Tensor:
+    """
+    Create a weak reference to a tensor.
+    The new tensor will share the same data as the original tensor,
+    but will not keep the original tensor alive.
+    """
+    return torch.ops._C.weak_ref_tensor(tensor)
+
+
+def weak_ref_tensors(
+    tensors: Union[torch.Tensor, List[torch.Tensor], Tuple[torch.Tensor]]
+) -> Union[torch.Tensor, List[torch.Tensor], Tuple[torch.Tensor]]:
+    """
+    Convenience function to create weak references to tensors,
+    for single tensor, list of tensors or tuple of tensors.
+    """
+    if isinstance(tensors, torch.Tensor):
+        return weak_ref_tensor(tensors)
+    if isinstance(tensors, list):
+        return [weak_ref_tensor(t) for t in tensors]
+    if isinstance(tensors, tuple):
+        return tuple(weak_ref_tensor(t) for t in tensors)
+    raise ValueError("Invalid type for tensors")
+
+
+def is_in_doc_build() -> bool:
+    try:
+        from sphinx.ext.autodoc.mock import _MockModule
+        return isinstance(torch, _MockModule)
+    except ModuleNotFoundError:
+        return False
+
+
+def import_from_path(module_name: str, file_path: Union[str, os.PathLike]):
+    """
+    Import a Python file according to its file path.
+
+    Based on the official recipe:
+    https://docs.python.org/3/library/importlib.html#importing-a-source-file-directly
+    """
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    if spec is None:
+        raise ModuleNotFoundError(f"No module named '{module_name}'")
+
+    assert spec.loader is not None
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+# create a library to hold the custom op
+vllm_lib = Library("vllm", "FRAGMENT")  # noqa
+
+
+def direct_register_custom_op(
+    op_name: str,
+    op_func: Callable,
+    mutates_args: List[str],
+    fake_impl: Optional[Callable] = None,
+    target_lib: Optional[Library] = None,
+):
+    """
+    `torch.library.custom_op` can have significant overhead because it
+    needs to consider complicated dispatching logic. This function
+    directly registers a custom op and dispatches it to the CUDA backend.
+    See https://gist.github.com/youkaichao/ecbea9ec9fc79a45d2adce1784d7a9a5
+    for more details.
+
+    By default, the custom op is registered to the vLLM library. If you
+    want to register it to a different library, you can pass the library
+    object to the `target_lib` argument.
+
+    IMPORTANT: the lifetime of the operator is tied to the lifetime of the
+    library object. If you want to bind the operator to a different library,
+    make sure the library object is alive when the operator is used.
+    """
+    if is_in_doc_build():
+        return
+    import torch.library
+    if hasattr(torch.library, "infer_schema"):
+        schema_str = torch.library.infer_schema(op_func,
+                                                mutates_args=mutates_args)
+    else:
+        # for pytorch 2.4
+        import torch._custom_op.impl
+        schema_str = torch._custom_op.impl.infer_schema(op_func, mutates_args)
+    my_lib = target_lib or vllm_lib
+    my_lib.define(op_name + schema_str)
+    my_lib.impl(op_name, op_func, "CUDA")
+    if fake_impl is not None:
+        my_lib._register_fake(op_name, fake_impl)
+
+
+def resolve_obj_by_qualname(qualname: str) -> Any:
+    """
+    Resolve an object by its fully qualified name.
+    """
+    module_name, obj_name = qualname.rsplit(".", 1)
+    module = importlib.import_module(module_name)
+    return getattr(module, obj_name)

@@ -1,16 +1,39 @@
 import enum
-from typing import NamedTuple, Optional, Tuple, Union
+import random
+from typing import TYPE_CHECKING, NamedTuple, Optional, Tuple, Union
 
+import numpy as np
 import torch
+
+if TYPE_CHECKING:
+    from vllm.config import VllmConfig
+else:
+    VllmConfig = None
+
+
+class _Backend(enum.Enum):
+    FLASH_ATTN = enum.auto()
+    FLASH_ATTN_VLLM_V1 = enum.auto()
+    XFORMERS = enum.auto()
+    ROCM_FLASH = enum.auto()
+    TORCH_SDPA = enum.auto()
+    OPENVINO = enum.auto()
+    FLASHINFER = enum.auto()
+    HPU_ATTN = enum.auto()
+    PALLAS = enum.auto()
+    IPEX = enum.auto()
+    NO_ATTENTION = enum.auto()
 
 
 class PlatformEnum(enum.Enum):
     CUDA = enum.auto()
     ROCM = enum.auto()
     TPU = enum.auto()
+    HPU = enum.auto()
     XPU = enum.auto()
     CPU = enum.auto()
     NEURON = enum.auto()
+    OPENVINO = enum.auto()
     UNSPECIFIED = enum.auto()
 
 
@@ -33,6 +56,7 @@ class DeviceCapability(NamedTuple):
 
 class Platform:
     _enum: PlatformEnum
+    device_type: str
 
     def is_cuda(self) -> bool:
         return self._enum == PlatformEnum.CUDA
@@ -43,6 +67,9 @@ class Platform:
     def is_tpu(self) -> bool:
         return self._enum == PlatformEnum.TPU
 
+    def is_hpu(self) -> bool:
+        return self._enum == PlatformEnum.HPU
+
     def is_xpu(self) -> bool:
         return self._enum == PlatformEnum.XPU
 
@@ -52,9 +79,17 @@ class Platform:
     def is_neuron(self) -> bool:
         return self._enum == PlatformEnum.NEURON
 
+    def is_openvino(self) -> bool:
+        return self._enum == PlatformEnum.OPENVINO
+
     def is_cuda_alike(self) -> bool:
         """Stateless version of :func:`torch.cuda.is_available`."""
         return self._enum in (PlatformEnum.CUDA, PlatformEnum.ROCM)
+
+    @classmethod
+    def get_default_attn_backend(cls, selected_backend: _Backend):
+        """Get the default attention backend of a device."""
+        return None
 
     @classmethod
     def get_device_capability(
@@ -107,6 +142,32 @@ class Platform:
         """
         return torch.inference_mode(mode=True)
 
+    @classmethod
+    def seed_everything(cls, seed: int) -> None:
+        """
+        Set the seed of each random module.
+        `torch.manual_seed` will set seed on all devices.
+
+        Loosely based on: https://github.com/Lightning-AI/pytorch-lightning/blob/2.4.0/src/lightning/fabric/utilities/seed.py#L20
+        """
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+
+    @classmethod
+    def check_and_update_config(cls, vllm_config: VllmConfig) -> None:
+        """
+        Check and update the configuration for the current platform.
+
+        It can raise an exception if the configuration is not compatible with
+        the current platform, or it can update the configuration to make it
+        compatible with the current platform.
+
+        The config is passed by reference, so it can be modified in place.
+        """
+        pass
+
 
 class UnspecifiedPlatform(Platform):
     _enum = PlatformEnum.UNSPECIFIED
+    device_type = ""
