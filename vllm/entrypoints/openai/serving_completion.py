@@ -112,7 +112,7 @@ class OpenAIServingCompletion(OpenAIServing):
                 elif request.regex_string is not None:
                     logits_processors = [RegexLogitsProcessor(request.regex_string, outlines_tokenizer)]
 
-            request_prompts, engine_prompts = self._preprocess_completion(
+            request_prompts, engine_prompts = await self._preprocess_completion(
                 request,
                 tokenizer,
                 request.prompt,
