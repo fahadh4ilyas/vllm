@@ -425,7 +425,8 @@ class ChatCompletionRequest(OpenAIBaseModel):
             skip_special_tokens=self.skip_special_tokens,
             spaces_between_special_tokens=self.spaces_between_special_tokens,
             logits_processors=get_logits_processors(self.logits_processors,
-                                                    logits_processor_pattern),
+                                                    logits_processor_pattern) + (
+                                                        logits_processors if logits_processors is not None else []),
             include_stop_str_in_output=self.include_stop_str_in_output,
             truncate_prompt_tokens=self.truncate_prompt_tokens,
             output_kind=RequestOutputKind.DELTA if self.stream \
@@ -748,7 +749,8 @@ class CompletionRequest(OpenAIBaseModel):
             logits_processors=logits_processors,
             include_stop_str_in_output=self.include_stop_str_in_output,
             logits_processors=get_logits_processors(self.logits_processors,
-                                                    logits_processor_pattern),
+                                                    logits_processor_pattern) + (
+                                                        logits_processors if logits_processors is not None else []),
             truncate_prompt_tokens=self.truncate_prompt_tokens,
             output_kind=RequestOutputKind.DELTA if self.stream \
                 else RequestOutputKind.FINAL_ONLY,
