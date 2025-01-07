@@ -833,7 +833,6 @@ class CompletionRequest(OpenAIBaseModel):
             prompt_logprobs=prompt_logprobs,
             skip_special_tokens=self.skip_special_tokens,
             spaces_between_special_tokens=self.spaces_between_special_tokens,
-            logits_processors=logits_processors,
             include_stop_str_in_output=self.include_stop_str_in_output,
             logits_processors=get_logits_processors(self.logits_processors,
                                                     logits_processor_pattern) + (
