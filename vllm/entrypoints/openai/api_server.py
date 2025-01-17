@@ -15,7 +15,7 @@ from argparse import Namespace
 from contextlib import asynccontextmanager
 from functools import partial
 from http import HTTPStatus
-from typing import AsyncIterator, Optional, Set, Tuple, AsyncGenerator
+from typing import AsyncIterator, Dict, Optional, Set, Tuple, Union, AsyncGenerator
 
 import uvloop
 from fastapi import APIRouter, FastAPI, HTTPException, Request
@@ -492,6 +492,8 @@ async def create_embedding(request: EmbeddingRequest, raw_request: Request):
             "use the Pooling API (`/pooling`) instead.")
 
         res = await fallback_handler.create_pooling(request, raw_request)
+
+        generator: Union[ErrorResponse, EmbeddingResponse]
         if isinstance(res, PoolingResponse):
             generator = EmbeddingResponse(
                 id=res.id,
@@ -566,7 +568,7 @@ async def create_score_v1(request: ScoreRequest, raw_request: Request):
     return await create_score(request, raw_request)
 
 
-TASK_HANDLERS = {
+TASK_HANDLERS: Dict[str, Dict[str, tuple]] = {
     "generate": {
         "messages": (ChatCompletionRequest, create_chat_completion),
         "default": (CompletionRequest, create_completion),
@@ -724,7 +726,7 @@ def build_app(args: Namespace) -> FastAPI:
         module_path, object_name = middleware.rsplit(".", 1)
         imported = getattr(importlib.import_module(module_path), object_name)
         if inspect.isclass(imported):
-            app.add_middleware(imported)
+            app.add_middleware(imported)  # type: ignore[arg-type]
         elif inspect.iscoroutinefunction(imported):
             app.middleware("http")(imported)
         else:
@@ -734,7 +736,7 @@ def build_app(args: Namespace) -> FastAPI:
     return app
 
 
-def init_app_state(
+async def init_app_state(
     engine_client: EngineClient,
     model_config: ModelConfig,
     state: State,
@@ -762,12 +764,13 @@ def init_app_state(
     logger.info("Using supplied chat template:\n%s", resolved_chat_template)
 
     state.openai_serving_models = OpenAIServingModels(
+        engine_client=engine_client,
         model_config=model_config,
         base_model_paths=base_model_paths,
         lora_modules=args.lora_modules,
         prompt_adapters=args.prompt_adapters,
     )
-    # TODO: The chat template is now broken for lora adapters :(
+    await state.openai_serving_models.init_static_loras()
     state.openai_serving_chat = OpenAIServingChat(
         engine_client,
         model_config,
@@ -866,7 +869,7 @@ async def run_server(args, **uvicorn_kwargs) -> None:
         app = build_app(args)
 
         model_config = await engine_client.get_model_config()
-        init_app_state(engine_client, model_config, app.state, args)
+        await init_app_state(engine_client, model_config, app.state, args)
 
         shutdown_task = await serve_http(
             app,
