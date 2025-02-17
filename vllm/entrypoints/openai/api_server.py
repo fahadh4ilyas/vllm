@@ -409,6 +409,7 @@ async def _generate(request_dict: dict, raw_request: Request) -> Response:
     ret = {"text": text_outputs}
     return JSONResponse(ret)
 
+
 @router.post("/tokenize", dependencies=[Depends(validate_json_request)])
 @with_cancellation
 async def tokenize(request: TokenizeRequest, raw_request: Request):
