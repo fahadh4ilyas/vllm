@@ -343,22 +343,10 @@ async def vllm_generate(request: Request) -> Response:
 async def _generate(request_dict: dict, raw_request: Request) -> Response:
 
     engine = await engine_client(raw_request).check_health()
-    tokenizer = await engine.get_tokenizer()
-    tokenizer = adapt_tokenizer(tokenizer)
 
     prompt = request_dict.pop("prompt")
     stream = request_dict.pop("stream", False)
-    json_schema = request_dict.pop("schema", None)
-    regex_string = request_dict.pop("regex", None)
-    if json_schema is not None:
-        logits_processors = [JSONLogitsProcessor(json_schema, tokenizer)]
-    elif regex_string is not None:
-        logits_processors = [RegexLogitsProcessor(regex_string, tokenizer)]
-    else:
-        logits_processors = []
-    sampling_params = sampling_params = SamplingParams(
-        **request_dict, logits_processors=logits_processors  # type: ignore
-    )
+    sampling_params = SamplingParams(**request_dict)
     request_id = random_uuid()
 
     assert engine is not None

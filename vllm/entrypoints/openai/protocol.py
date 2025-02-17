@@ -353,12 +353,6 @@ class ChatCompletionRequest(OpenAIBaseModel):
             "arguments. For example: {'qualname': "
             "'my_module.MyLogitsProcessor', 'args': [1, 2], 'kwargs': "
             "{'param': 'value'}}."))
-    json_schema: Optional[Union[str, dict]] = Field(
-        default=None
-    )
-    regex_string: Optional[str] = Field(
-        default=None
-    )
 
     # doc: end-chat-completion-extra-params
 
@@ -401,7 +395,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
             self,
             default_max_tokens: int,
             logits_processor_pattern: Optional[str],
-            default_sampling_params: Optional[dict] = None, logits_processors: Optional[list] = None) -> SamplingParams:
+            default_sampling_params: Optional[dict] = None) -> SamplingParams:
         # TODO(#9845): remove max_tokens when field is removed from OpenAI API
         max_tokens = self.max_completion_tokens or self.max_tokens
         if max_tokens is None:
@@ -472,9 +466,8 @@ class ChatCompletionRequest(OpenAIBaseModel):
             min_tokens=self.min_tokens,
             skip_special_tokens=self.skip_special_tokens,
             spaces_between_special_tokens=self.spaces_between_special_tokens,
-            logits_processors=((get_logits_processors(self.logits_processors,
-                                                    logits_processor_pattern) or []) + (
-                                                        logits_processors or [])) or None,
+            logits_processors=get_logits_processors(self.logits_processors,
+                                                    logits_processor_pattern),
             include_stop_str_in_output=self.include_stop_str_in_output,
             truncate_prompt_tokens=self.truncate_prompt_tokens,
             output_kind=RequestOutputKind.DELTA if self.stream \
@@ -721,12 +714,6 @@ class CompletionRequest(OpenAIBaseModel):
             "arguments. For example: {'qualname': "
             "'my_module.MyLogitsProcessor', 'args': [1, 2], 'kwargs': "
             "{'param': 'value'}}."))
-    json_schema: Optional[Union[str, dict]] = Field(
-        default=None
-    )
-    regex_string: Optional[str] = Field(
-        default=None
-    )
 
     # doc: end-completion-extra-params
 
@@ -767,7 +754,7 @@ class CompletionRequest(OpenAIBaseModel):
             self,
             default_max_tokens: int,
             logits_processor_pattern: Optional[str],
-            default_sampling_params: Optional[dict] = None, logits_processors: Optional[list] = None) -> SamplingParams:
+            default_sampling_params: Optional[dict] = None) -> SamplingParams:
         max_tokens = self.max_tokens
         if max_tokens is None:
             max_tokens = default_max_tokens
@@ -834,9 +821,8 @@ class CompletionRequest(OpenAIBaseModel):
             skip_special_tokens=self.skip_special_tokens,
             spaces_between_special_tokens=self.spaces_between_special_tokens,
             include_stop_str_in_output=self.include_stop_str_in_output,
-            logits_processors=((get_logits_processors(self.logits_processors,
-                                                    logits_processor_pattern) or []) + (
-                                                        logits_processors or [])) or None,
+            logits_processors=get_logits_processors(self.logits_processors,
+                                                    logits_processor_pattern),
             truncate_prompt_tokens=self.truncate_prompt_tokens,
             output_kind=RequestOutputKind.DELTA if self.stream \
                 else RequestOutputKind.FINAL_ONLY,
