@@ -26,9 +26,6 @@ from starlette.datastructures import State
 from starlette.routing import Mount
 from typing_extensions import assert_never
 
-from outlines.models.vllm import adapt_tokenizer
-from outlines.processors import JSONLogitsProcessor, RegexLogitsProcessor
-
 import vllm.envs as envs
 from vllm.config import ModelConfig
 from vllm.engine.arg_utils import AsyncEngineArgs
