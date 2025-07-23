@@ -503,7 +503,22 @@ async def _generate(request_dict: dict, raw_request: Request) -> Response:
     return JSONResponse(ret)
 
 
-@router.post("/tokenize", dependencies=[Depends(validate_json_request)])
+@router.post("/tokenize",
+             dependencies=[Depends(validate_json_request)],
+             responses={
+                 HTTPStatus.BAD_REQUEST.value: {
+                     "model": ErrorResponse
+                 },
+                 HTTPStatus.NOT_FOUND.value: {
+                     "model": ErrorResponse
+                 },
+                 HTTPStatus.INTERNAL_SERVER_ERROR.value: {
+                     "model": ErrorResponse
+                 },
+                 HTTPStatus.NOT_IMPLEMENTED.value: {
+                     "model": ErrorResponse
+                 },
+             })
 @with_cancellation
 async def tokenize(request: TokenizeRequest, raw_request: Request):
     handler = tokenization(raw_request)
