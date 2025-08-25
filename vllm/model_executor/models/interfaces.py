@@ -8,7 +8,7 @@ from typing import (TYPE_CHECKING, ClassVar, Literal, Optional, Protocol,
 import numpy as np
 import torch
 from torch import Tensor
-from transformers.models.whisper.tokenization_whisper import LANGUAGES
+from transformers.models.whisper.tokenization_whisper import LANGUAGES as BASE_LANGUAGES
 from typing_extensions import Self, TypeIs
 
 from vllm.config import ModelConfig, SpeechToTextConfig
@@ -28,6 +28,9 @@ if TYPE_CHECKING:
     from vllm.sequence import IntermediateTensors
 
 logger = init_logger(__name__)
+
+LANGUAGES = BASE_LANGUAGES.copy()
+LANGUAGES['jv'] = 'javanese'
 
 MultiModalEmbeddings = Union[list[Tensor], Tensor, tuple[Tensor, ...]]
 """
